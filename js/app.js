@@ -2,7 +2,7 @@ import { readMood, sequence, SHORTCUTS, rampColor, vibeIndex, rgb, vibeColor, DE
 import * as sp from './spotify.js';
 import { DEMO_TRACKS } from './demo.js';
 import { reducedMotion, motionPref, setMotionPref } from './motion.js';
-import { onInstallChange, promptInstall } from './install.js';
+import { onInstallChange, promptInstall, browserName, openInChromeLink } from './install.js';
 import { savedTaste, MODES as STUDIO_MODES } from './studio.js';
 
 const $ = id => document.getElementById(id);
@@ -783,15 +783,26 @@ async function showLauncher() {
   }
 }
 
-// Install button: one tap when the browser allows it, otherwise exact steps for this browser.
+// Install button: always visible (until installed). One tap installs when the browser allows it;
+// otherwise it shows the exact steps for this browser, and an "Open in Chrome" link on Android.
 function bindInstall() {
+  let state = null;
   onInstallChange(st => {
-    document.querySelectorAll('[data-install]').forEach(b => { b.hidden = st.kind !== 'prompt'; });
-    document.querySelectorAll('[data-install-note]').forEach(p => { p.textContent = st.text; });
+    state = st;
+    document.querySelectorAll('[data-install]').forEach(b => { b.hidden = st.kind === 'installed'; });
+    document.querySelectorAll('[data-install-note]').forEach(p => {
+      p.textContent = st.kind === 'installed' ? st.text : st.kind === 'prompt' ? `${st.text} (${browserName()})` : `You're using ${browserName()}.`;
+    });
     $('launch-install').hidden = st.kind === 'installed';
   });
   document.querySelectorAll('[data-install]').forEach(b => b.addEventListener('click', async () => {
-    if (await promptInstall()) toast('Installed. Open Cortex FM from your home screen.');
+    if (state?.kind === 'prompt') {
+      if (await promptInstall()) toast('Installed. Open Cortex FM from your home screen.');
+      return;
+    }
+    const chrome = openInChromeLink();
+    const needChrome = !/Chrome on Android/.test(browserName());
+    toast(`${escapeHtml(state?.text || '')}${chrome && needChrome ? ` <a href="${chrome}">Open in Chrome</a>` : ''}`, { html: true, ms: 15000 });
   }));
 }
 

@@ -604,3 +604,4 @@ body.intro-on .readout, body.intro-on .panel, body.intro-on .bar { pointer-event
 
 .install-row { display: grid; gap: 6px; justify-items: start; }
 .install-row .hint { font-size: 12.5px; }
+.install-row button { width: 100%; height: 46px; }
