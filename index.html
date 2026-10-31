@@ -217,6 +217,12 @@
         <p class="hint">Full keeps the intro, the breathing brain and every effect, even if Windows is set to reduce animations.</p>
       </fieldset>
 
+      <fieldset>
+        <legend>Install on this device</legend>
+        <p class="hint" data-install-note></p>
+        <div class="row"><button class="ghost" type="button" data-install hidden>Install Cortex FM</button></div>
+      </fieldset>
+
       <fieldset id="check" hidden>
         <legend>Playback check</legend>
         <p class="hint">Songs stopping on your phone? This plays for 20 seconds on your open Spotify device and tells you what the device did.</p>
@@ -254,6 +260,7 @@
         <button class="send" type="submit" aria-label="Build my session"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
       </form>
       <button class="primary launch-connect" type="button" id="launch-connect" hidden>Connect Spotify</button>
+      <div class="install-row" id="launch-install" hidden><button class="ghost" type="button" data-install>Install Cortex FM</button><p class="hint" data-install-note></p></div>
       <p class="launch-now" id="launch-now" hidden></p>
       <div class="launch-tiles">
         <button type="button" class="tile" id="tile-mood">
