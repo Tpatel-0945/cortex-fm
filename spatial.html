@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Cortex FM Spatial Studio</title>
+  <meta name="description" content="Turn a song into 8D or 16D audio: it glides through points on a sphere around your head.">
+  <meta name="theme-color" content="#0f1630">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>try{var m=localStorage.getItem('cfm.pref.motion')||'full';var r=matchMedia('(prefers-reduced-motion: reduce)').matches;if(m==='full'||(m==='system'&&!r))document.documentElement.classList.add('motion-full');if(m==='reduced')document.documentElement.classList.add('motion-calm');}catch(e){}</script>
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+</head>
+<body class="spatial-page">
+  <div class="field" aria-hidden="true"></div>
+
+  <header class="bar">
+    <a class="brand" href="./" aria-label="Cortex FM home">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11" fill="none" stroke="var(--vibe-a)" stroke-width="5"/><circle cx="16" cy="16" r="11" fill="none" stroke="var(--vibe-b)" stroke-width="5" stroke-dasharray="34 100" transform="rotate(-90 16 16)"/></svg>
+      Cortex FM
+    </a>
+    <nav class="tabs" aria-label="Sections">
+      <a href="./">Mood</a>
+      <a href="spatial.html#spatial" data-view="spatial" aria-current="page">Spatial</a>
+      <a href="spatial.html#studio" data-view="studio">Studio</a>
+    </nav>
+  </header>
+
+  <main class="app">
+    <section class="stage orbit" aria-label="The sound's path around your head">
+      <canvas id="orbit" aria-hidden="true"></canvas>
+      <div class="node-labels" id="labels" aria-hidden="true"></div>
+      <div class="readout">
+        <p class="readout-title" id="where-title">Point 1 of 8</p>
+        <p class="where" id="where">Front right, above you</p>
+        <p class="note">Drag to look around. You're the head in the middle, seen from behind.</p>
+      </div>
+    </section>
+
+    <section class="panel rail">
+      <!-- Shared player: stays the same in Spatial and Studio -->
+      <div class="nowbar" id="song">
+        <div class="nowbar-top">
+          <button class="play" id="play" type="button" aria-label="Play" aria-pressed="false" disabled>
+            <svg class="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <svg class="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>
+          </button>
+          <div class="nowbar-text">
+            <b id="song-name">Pick a song below</b>
+            <small id="song-sub">Full songs come from your music folder</small>
+          </div>
+          <span class="kind" id="song-kind" hidden></span>
+        </div>
+        <div class="seek">
+          <input type="range" id="seek" min="0" max="1" step="0.001" value="0" aria-label="Position in song" disabled>
+          <div class="times"><span id="t-now">0:00</span><span id="t-total">0:00</span></div>
+        </div>
+        <label class="switch"><input type="checkbox" id="bypass" disabled><span class="track-ui" aria-hidden="true"></span>Hear the original</label>
+      </div>
+
+      <!-- SPATIAL: where the song moves -->
+      <div class="view" id="view-spatial">
+        <header class="view-head">
+          <h1>Spatial</h1>
+          <p>Where the song moves around your head.</p>
+        </header>
+
+        <section class="card cable" id="cable" aria-labelledby="cable-title">
+          <div class="cable-head">
+            <h2 id="cable-title">Full Spotify songs</h2>
+            <button class="ghost small" type="button" id="cable-connect">Connect the cable</button>
+          </div>
+          <p class="cable-state" id="cable-state">Not set up yet.</p>
+          <ol class="steps" id="cable-steps">
+            <li>Install the free <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener">VB-Audio Virtual Cable</a> and restart your PC.</li>
+            <li>Windows Settings, Sound, <b>Volume mixer</b>: set <b>Spotify</b>'s output to <b>CABLE Input</b>.</li>
+            <li>Press <b>Connect the cable</b> and allow it. Keep the Spotify app open.</li>
+          </ol>
+        </section>
+
+        <section class="card library" id="library" aria-label="Choose a song">
+          <div class="segmented sm" role="tablist" aria-label="Song list">
+            <label><input type="radio" name="lib" value="music" checked><span>My music</span></label>
+            <label><input type="radio" name="lib" value="session"><span>Mood</span></label>
+            <label><input type="radio" name="lib" value="top"><span>Top</span></label>
+            <label><input type="radio" name="lib" value="search"><span>Search</span></label>
+          </div>
+          <form class="spot" id="spot" role="search" hidden>
+            <input id="spot-search" type="search" placeholder="Any song or artist" autocomplete="off" enterkeyhint="search" aria-label="Search Spotify">
+          </form>
+          <p class="hint" id="lib-note"></p>
+          <ol class="results lib-list" id="lib-list"></ol>
+          <div class="lib-foot">
+            <label class="switch"><input type="checkbox" id="autoplay" checked><span class="track-ui" aria-hidden="true"></span>Play in order</label>
+            <button class="ghost small" type="button" id="add-file">Add songs</button>
+            <button class="ghost small" type="button" id="demo">Demo beat</button>
+          </div>
+          <input id="file" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.aac,.opus" multiple hidden>
+        </section>
+
+        <fieldset class="modes">
+          <legend>Movement</legend>
+          <div class="segmented" role="radiogroup" aria-label="Points on the sphere">
+            <label><input type="radio" name="mode" value="8" checked><span>8D</span></label>
+            <label><input type="radio" name="mode" value="16"><span>16D</span></label>
+          </div>
+          <p class="hint" id="mode-note"></p>
+          <p class="hint">Like a Dolby Atmos mix, the sound also changes distance (closer is drier and brighter, farther is duller with more echo) and now and then makes a surprise move: a fly-over, a whisper at your ear, a spiral, a sweep, a pull-away or a halo.</p>
+        </fieldset>
+
+        <div class="sliders">
+          <label class="slider"><span>Glide speed <output id="speed-out"></output></span>
+            <input type="range" id="speed" min="4" max="30" step="1" value="12"></label>
+          <label class="slider"><span>Distance <output id="dist-out"></output></span>
+            <input type="range" id="dist" min="0.8" max="4" step="0.1" value="1.8"></label>
+          <label class="slider"><span>Glide feel <output id="linger-out"></output></span>
+            <input type="range" id="linger" min="0" max="0.6" step="0.05" value="0.3"></label>
+          <label class="slider"><span>Surprise moves <output id="surprise-out"></output></span>
+            <input type="range" id="surprise" min="0" max="1" step="0.1" value="0.5"></label>
+        </div>
+
+        <button class="primary wide" type="button" id="save" disabled>Save 8D version as WAV</button>
+        <p class="hint" id="save-note"></p>
+
+        <details class="route">
+          <summary>The path, in glide order</summary>
+          <ol class="points" id="points"></ol>
+        </details>
+      </div>
+
+      <!-- STUDIO: how the song sounds -->
+      <div class="view" id="view-studio" hidden>
+        <header class="view-head">
+          <h1>Studio</h1>
+          <p>How the song sounds. Each song remembers its own sound.</p>
+        </header>
+
+        <section class="studio" id="studio" aria-label="Sound">
+          <div class="studio-head">
+            <h2>Sound mode</h2>
+            <button class="ghost small" type="button" id="auto">Auto-tune</button>
+          </div>
+          <div class="toggles modes-row" id="studio-modes" role="radiogroup" aria-label="Sound mode"></div>
+          <div class="eq-wrap"><canvas id="eq-canvas" aria-hidden="true"></canvas></div>
+          <p class="hint" id="studio-note">Pick a mode, or press Auto-tune to let it listen and set the bands.</p>
+          <div class="bands" id="bands"></div>
+          <div class="sliders">
+            <label class="slider"><span>Volume <output id="vol-out"></output></span>
+              <input type="range" id="vol" min="-12" max="6" step="0.5" value="0"></label>
+            <label class="slider"><span>Punch <output id="punch-out"></output></span>
+              <input type="range" id="punch" min="0" max="1" step="0.05" value="0"></label>
+            <label class="slider"><span>Warmth <output id="drive-out"></output></span>
+              <input type="range" id="drive" min="0" max="0.6" step="0.05" value="0"></label>
+            <label class="slider"><span>Room echo <output id="room-out"></output></span>
+              <input type="range" id="room" min="0" max="1" step="0.05" value="0.35"></label>
+          </div>
+          <button class="ghost small" type="button" id="reset-studio">Back to the original sound</button>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="js/spatial.js"></script>
+</body>
+</html>

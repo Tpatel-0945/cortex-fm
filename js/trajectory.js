@@ -1,0 +1,137 @@
+// The glide path for 8D/16D.
+//
+// 1. A periodic C2 cubic spline through every point (smooth position, direction AND turning,
+//    so there is no jolt anywhere), parameterised by the real distance between points.
+// 2. Kept on the sphere and re-timed by arc length, so the glide speed is even.
+// 3. A speed profile ("glide feel"): the sound eases through each marked point instead of
+//    racing past it. The lap time stays exactly what you set.
+//
+// The result is two small tables (`table`, `phi`) that the audio thread and the 3D view
+// both read, so what you see is exactly what you hear.
+
+export const TABLE = 1024;
+
+const norm3 = v => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+const angle = (a, b) => Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])));
+
+// Small dense solver (N is 8 or 16).
+function solve(A, b) {
+  const n = b.length;
+  A = A.map(r => r.slice()); b = b.slice();
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    [A[c], A[p]] = [A[p], A[c]]; [b[c], b[p]] = [b[p], b[c]];
+    for (let r = c + 1; r < n; r++) {
+      const f = A[r][c] / A[c][c];
+      if (!f) continue;
+      for (let k = c; k < n; k++) A[r][k] -= f * A[c][k];
+      b[r] -= f * b[c];
+    }
+  }
+  const x = new Array(n).fill(0);
+  for (let r = n - 1; r >= 0; r--) { let s = b[r]; for (let k = r + 1; k < n; k++) s -= A[r][k] * x[k]; x[r] = s / A[r][r]; }
+  return x;
+}
+
+/**
+ * points: unit vectors [x,y,z] in visiting order (the path closes back to the first).
+ * linger: 0 = perfectly even speed, 0.6 = clearly slows at each point.
+ */
+export function buildPath(points, { linger = 0.3 } = {}) {
+  const N = points.length;
+  const P = points.map(norm3);
+  const h = P.map((p, i) => Math.max(1e-3, angle(p, P[(i + 1) % N])));
+
+  // Periodic cubic spline, per axis: second derivatives M from the cyclic system.
+  const M = [0, 1, 2].map(ax => {
+    const A = [...Array(N)].map(() => new Array(N).fill(0)), b = new Array(N).fill(0);
+    for (let i = 0; i < N; i++) {
+      const im = (i - 1 + N) % N, ip = (i + 1) % N;
+      A[i][im] += h[im]; A[i][i] += 2 * (h[im] + h[i]); A[i][ip] += h[i];
+      b[i] = 6 * ((P[ip][ax] - P[i][ax]) / h[i] - (P[i][ax] - P[im][ax]) / h[im]);
+    }
+    return solve(A, b);
+  });
+  const seg = (i, tau) => {
+    const ip = (i + 1) % N, hi = h[i], a = hi - tau;
+    return norm3([0, 1, 2].map(ax =>
+      M[ax][i] * a * a * a / (6 * hi) + M[ax][ip] * tau * tau * tau / (6 * hi)
+      + (P[i][ax] / hi - M[ax][i] * hi / 6) * a + (P[ip][ax] / hi - M[ax][ip] * hi / 6) * tau));
+  };
+
+  // Dense samples along the spline, then arc length.
+  const SS = 8192, T = h.reduce((a, b) => a + b, 0);
+  const starts = []; { let acc = 0; for (let i = 0; i < N; i++) { starts.push(acc); acc += h[i]; } }
+  const pts = new Array(SS + 1), nodeK = new Array(N);
+  let i = 0;
+  for (let k = 0; k <= SS; k++) {
+    const t = (k / SS) * T;
+    while (i < N - 1 && t >= starts[i + 1]) i++;
+    pts[k] = seg(i, Math.min(t - starts[i], h[i]));
+  }
+  for (let j = 0; j < N; j++) nodeK[j] = Math.round((starts[j] / T) * SS);
+  const L = new Float64Array(SS + 1);
+  for (let k = 1; k <= SS; k++) L[k] = L[k - 1] + angle(pts[k - 1], pts[k]);
+  const Ltot = L[SS];
+  const nodeU = nodeK.map(k => L[k] / Ltot);
+
+  // Resample evenly by arc length.
+  const table = new Float32Array(TABLE * 3);
+  let k = 0;
+  for (let j = 0; j < TABLE; j++) {
+    const target = (j / TABLE) * Ltot;
+    while (k < SS - 1 && L[k + 1] < target) k++;
+    const f = (target - L[k]) / Math.max(1e-12, L[k + 1] - L[k]);
+    const v = norm3([0, 1, 2].map(ax => pts[k][ax] + (pts[k + 1][ax] - pts[k][ax]) * f));
+    table[j * 3] = v[0]; table[j * 3 + 1] = v[1]; table[j * 3 + 2] = v[2];
+  }
+
+  return { table, phi: speedProfile(nodeU, linger), nodeU, N };
+}
+
+/** phi maps orbit time s (0..1, even in time) to path position u (0..1, even in distance). */
+export function speedProfile(nodeU, linger) {
+  const G = 4096, sigma = 0.3 / nodeU.length;
+  const cum = new Float64Array(G + 1);
+  for (let g = 0; g < G; g++) {
+    const u = (g + 0.5) / G;
+    let near = 0;
+    for (const nu of nodeU) { let d = Math.abs(u - nu); d = Math.min(d, 1 - d); near += Math.exp(-(d / sigma) * (d / sigma)); }
+    const speed = Math.max(0.25, 1 - linger * Math.min(1, near));
+    cum[g + 1] = cum[g] + 1 / speed; // time spent in this slice
+  }
+  const total = cum[G];
+  const phi = new Float32Array(TABLE);
+  let g = 0;
+  for (let j = 0; j < TABLE; j++) {
+    const s = (j / TABLE) * total;
+    while (g < G - 1 && cum[g + 1] < s) g++;
+    const f = (s - cum[g]) / Math.max(1e-12, cum[g + 1] - cum[g]);
+    phi[j] = (g + f) / G;
+  }
+  return phi;
+}
+
+// ---- evaluation (the audio worklet has an identical copy) ----
+
+export function uOfS(phi, s) {
+  s -= Math.floor(s);
+  const x = s * TABLE, i = Math.floor(x), f = x - i;
+  const a = phi[i], b = i + 1 < TABLE ? phi[i + 1] : 1;
+  return a + (b - a) * f;
+}
+
+/** Direction (unit vector) at path position u, Catmull-Rom between table points. */
+export function dirAt(table, u, out = [0, 0, 0]) {
+  u -= Math.floor(u);
+  const x = u * TABLE, i = Math.floor(x), f = x - i, f2 = f * f, f3 = f2 * f;
+  const i0 = ((i - 1 + TABLE) % TABLE) * 3, i1 = (i % TABLE) * 3, i2 = ((i + 1) % TABLE) * 3, i3 = ((i + 2) % TABLE) * 3;
+  for (let a = 0; a < 3; a++) {
+    const p0 = table[i0 + a], p1 = table[i1 + a], p2 = table[i2 + a], p3 = table[i3 + a];
+    out[a] = 0.5 * (2 * p1 + (-p0 + p2) * f + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f2 + (-p0 + 3 * p1 - 3 * p2 + p3) * f3);
+  }
+  const l = Math.hypot(out[0], out[1], out[2]) || 1;
+  out[0] /= l; out[1] /= l; out[2] /= l;
+  return out;
+}
