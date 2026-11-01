@@ -103,14 +103,28 @@
           <input id="file" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.aac,.opus" multiple hidden>
         </section>
 
+        <section class="card traj" id="traj" aria-labelledby="traj-title">
+          <h2 id="traj-title">Trajectory</h2>
+          <div class="toggles" id="shapes" role="radiogroup" aria-label="Trajectory shape"></div>
+          <p class="hint" id="shape-note"></p>
+          <div class="draw" id="draw" hidden>
+            <canvas id="pad" aria-label="Top view of your head: tap to add points, drag to move them"></canvas>
+            <div class="row">
+              <button class="ghost small" type="button" id="pad-undo">Undo</button>
+              <button class="ghost small" type="button" id="pad-clear">Clear</button>
+              <span class="hint" id="pad-count"></span>
+            </div>
+          </div>
+        </section>
+
         <fieldset class="modes">
-          <legend>Movement</legend>
+          <legend>Points on the path</legend>
           <div class="segmented" role="radiogroup" aria-label="Points on the sphere">
             <label><input type="radio" name="mode" value="8" checked><span>8D</span></label>
             <label><input type="radio" name="mode" value="16"><span>16D</span></label>
           </div>
           <p class="hint" id="mode-note"></p>
-          <p class="hint">Like a Dolby Atmos mix, the sound also changes distance (closer is drier and brighter, farther is duller with more echo) and now and then makes a surprise move: a fly-over, a whisper at your ear, a spiral, a sweep, a pull-away or a halo.</p>
+          <p class="hint">Like a Dolby Atmos mix: the song's centre moves along your path, its spacious part surrounds you from six fixed speakers all around and above (360° surround), the distance changes (closer is drier and brighter, farther is duller with more echo), and now and then a surprise move happens: a fly-over, a whisper at your ear, a spiral, a sweep, a pull-away or a halo.</p>
         </fieldset>
 
         <div class="sliders">
@@ -122,6 +136,8 @@
             <input type="range" id="linger" min="0" max="0.6" step="0.05" value="0.3"></label>
           <label class="slider"><span>Surprise moves <output id="surprise-out"></output></span>
             <input type="range" id="surprise" min="0" max="1" step="0.1" value="0.5"></label>
+          <label class="slider"><span>360° surround <output id="surround-out"></output></span>
+            <input type="range" id="surround" min="0" max="1" step="0.05" value="0.6"></label>
         </div>
 
         <button class="primary wide" type="button" id="save" disabled>Save 8D version as WAV</button>

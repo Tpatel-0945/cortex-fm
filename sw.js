@@ -1,6 +1,6 @@
 // Keeps the app shell available offline. Spotify calls always go to the network.
-const CACHE = 'cortex-fm-v17';
-const SHELL = ['./', 'index.html', 'styles.css', 'js/app.js', 'js/mood.js', 'js/spotify.js', 'js/demo.js', 'js/brain.js', 'js/player.js', 'spatial.html', 'js/spatial.js', 'js/spatial-audio.js', 'js/studio.js', 'js/motion.js', 'js/devicefiles.js', 'js/preview.js', 'js/trajectory.js', 'js/trajectory-worklet.js', 'js/install.js',
+const CACHE = 'cortex-fm-v21';
+const SHELL = ['./', 'index.html', 'styles.css', 'js/app.js', 'js/mood.js', 'js/spotify.js', 'js/demo.js', 'js/brain.js', 'js/player.js', 'spatial.html', 'js/spatial.js', 'js/spatial-audio.js', 'js/studio.js', 'js/motion.js', 'js/devicefiles.js', 'js/preview.js', 'js/trajectory.js', 'js/trajectory-worklet.js', 'js/install.js', 'js/intro-sound.js',
   'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {

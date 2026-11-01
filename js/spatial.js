@@ -3,8 +3,8 @@
 import * as THREE from 'three';
 import { hemisphere, cerebellum } from './brain.js';
 import { rampColor } from './mood.js';
-import { SpatialEngine } from './spatial-audio.js';
-import { buildPath, uOfS, dirAt } from './trajectory.js';
+import { SpatialEngine, BED } from './spatial-audio.js';
+import { buildPath, uOfS, dirAt, SHAPES, shapePoints, dirFromAzEl } from './trajectory.js';
 import * as sp from './spotify.js';
 import * as dev from './devicefiles.js';
 import { findPreview } from './preview.js';
@@ -83,6 +83,14 @@ head.scale.setScalar(0.5);
 head.rotation.y = Math.PI; // the brain model faces +Z; the listener faces -Z
 world.add(head);
 
+// The six fixed surround speakers (the 360° bed): small rings that glow with the music.
+const bedMarks = BED.map(([az, el]) => {
+  const m = new THREE.Mesh(new THREE.RingGeometry(0.07, 0.1, 6), new THREE.MeshBasicMaterial({ color: 0xdfe4ff, transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false }));
+  m.position.copy(dir(az, el).multiplyScalar(R * 0.82)); m.lookAt(0, 0, 0);
+  world.add(m);
+  return m;
+});
+
 // Points, spokes, path, orb and trail are rebuilt when the layout changes.
 let layer = null, nodes = [], path = null, nodeU = [], labels = [];
 
@@ -91,7 +99,8 @@ function buildLayout(n) {
   layer = new THREE.Group();
   world.add(layer);
   const L = LAYOUTS[n];
-  nodes = L.points.map(([az, el], i) => ({ dir: dir(az, el), color: colorFor(i, n), az, el }));
+  const pts = layoutPoints(n);
+  nodes = pts.map((d, i) => ({ dir: d, color: colorFor(i, pts.length) }));
 
   // C2-smooth closed path through every point, on the sphere, with the chosen glide feel.
   path = buildPath(nodes.map(p => [p.dir.x, p.dir.y, p.dir.z]), { linger: st.linger });
@@ -128,7 +137,7 @@ function buildLayout(n) {
   $('labels').innerHTML = nodes.map((_, i) => `<span class="node-label">${i + 1}</span>`).join('');
   labels = [...$('labels').children];
   $('points').innerHTML = nodes.map((p, i) => `<li><span class="sw" style="background:#${p.color.getHexString(THREE.SRGBColorSpace)}"></span><span class="pn">${i + 1}</span><span>${describe(p.dir)}</span></li>`).join('');
-  $('mode-note').textContent = L.note;
+  $('mode-note').textContent = st.shape === 'classic' ? L.note : st.shape === 'custom' ? `${pts.length} points, drawn by you.` : `${n} points along the ${SHAPES[st.shape].label.toLowerCase()}.`;
   trailHist.length = 0;
 }
 
@@ -166,7 +175,22 @@ const ray = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color: 0xffffff
 
 // ---------- audio + state ----------
 const engine = new SpatialEngine();
-const st = { n: 8, lap: 12, dist: 1.8, linger: 0.3, surprise: 0.5, phase: 0, idle: 0, dragging: null, lastNode: -1 };
+// Saved Spatial choices: trajectory shape, its random seed, your drawn path, surround amount.
+const saved = (() => { try { return JSON.parse(localStorage.getItem('cfm.spatial') || '{}'); } catch { return {}; } })();
+const st = {
+  n: 8, lap: 12, dist: 1.8, linger: 0.3, surprise: 0.5, phase: 0, idle: 0, dragging: null, lastNode: -1,
+  shape: SHAPES[saved.shape] ? saved.shape : 'classic', seed: saved.seed || 7,
+  custom: Array.isArray(saved.custom) ? saved.custom : [[-60, 0], [60, 30], [150, -20], [-150, 40]],
+  surround: typeof saved.surround === 'number' ? saved.surround : 0.6,
+};
+const saveSpatial = () => { try { localStorage.setItem('cfm.spatial', JSON.stringify({ shape: st.shape, seed: st.seed, custom: st.custom, surround: st.surround })); } catch { /* */ } };
+
+/** The marked points for the current trajectory, as unit vectors. */
+function layoutPoints(n) {
+  if (st.shape === 'custom' && st.custom.length >= 3) return st.custom.map(([az, el]) => dir(az, el));
+  if (st.shape === 'classic' || st.shape === 'custom') return LAYOUTS[n].points.map(([az, el]) => dir(az, el));
+  return shapePoints(st.shape, n, st.seed).map(v => new THREE.Vector3(v[0], v[1], v[2]));
+}
 
 const _d = [0, 0, 0];
 const pathDir = u => { dirAt(path.table, u, _d); return new THREE.Vector3(_d[0], _d[1], _d[2]); };
@@ -200,6 +224,7 @@ function frame() {
 
   const pos = d.clone().multiplyScalar(R * st.shown);
   const level = engine.level();
+  bedMarks.forEach((m, i) => { m.material.opacity = st.surround < 0.01 ? 0.05 : 0.15 + st.surround * (0.25 + level * 1.2 * (0.6 + 0.4 * Math.sin(clock.elapsedTime * 2 + i))); });
   const col = colorAt(st.phase);
   orb.position.copy(pos); glow.position.copy(pos);
   orb.material.color.copy(col).lerp(new THREE.Color(1, 1, 1), 0.35);
@@ -377,6 +402,7 @@ function updateLabels() {
   $('dist-out').textContent = `${st.dist.toFixed(1)} m from your head`;
   $('linger-out').textContent = st.linger < 0.05 ? 'even glide' : st.linger < 0.4 ? 'eases through each point' : 'lingers at each point';
   $('surprise-out').textContent = st.surprise < 0.05 ? 'off' : st.surprise < 0.4 ? 'now and then' : st.surprise < 0.8 ? 'often' : 'all the time';
+  $('surround-out').textContent = st.surround < 0.03 ? 'off' : st.surround < 0.35 ? 'subtle' : st.surround < 0.75 ? 'wide' : 'all around you';
   $('room-out').textContent = `${Math.round(engine.roomAmount * 100)}%`;
   $('save').textContent = `Save ${st.n}D version as WAV`;
 }
@@ -888,7 +914,101 @@ let searchDeb;
 $('spot-search').addEventListener('input', e => { clearTimeout(searchDeb); searchDeb = setTimeout(() => search(e.target.value), 350); });
 $('spot').addEventListener('submit', e => { e.preventDefault(); search($('spot-search').value); });
 
+// ---------- trajectory card ----------
+function renderShapes() {
+  $('shapes').innerHTML = Object.entries(SHAPES).map(([id, sh]) =>
+    `<button type="button" class="chip" role="radio" data-shape="${id}" aria-checked="${st.shape === id}">${sh.label}${sh.pick ? '<span class="pick">Our pick</span>' : ''}</button>`).join('');
+  const sh = SHAPES[st.shape];
+  $('shape-note').textContent = st.shape === 'classic' ? 'The original 8D/16D path through the marked points.' : sh.note;
+  $('draw').hidden = st.shape !== 'custom';
+  document.querySelector('.modes').hidden = st.shape === 'custom';
+  if (st.shape === 'custom') requestAnimationFrame(drawPad);
+}
+
+$('shapes').addEventListener('click', e => {
+  const b = e.target.closest('[data-shape]'); if (!b) return;
+  const id = b.dataset.shape;
+  if (id === 'wander' && st.shape === 'wander') st.seed = (Math.random() * 1e9) | 0; // a new wander each tap
+  st.shape = id;
+  saveSpatial(); renderShapes(); buildLayout(st.n); st.lastNode = -1;
+  toast(id === 'custom' ? 'Draw your path: tap the circle to place points.' : `Trajectory: ${SHAPES[id].label}.`);
+});
+
+// Draw-your-own pad: a top view of your head. Centre = above you, inner ring = ear level, edge = below.
+const pad = $('pad'), pg = pad.getContext('2d');
+const PAD = { drag: -1, moved: false };
+const elToR = el => (90 - el) / 150;                       // 90° up → centre, 0° → 0.6, -60° → edge
+const rToEl = r => Math.round(Math.max(-60, Math.min(85, 90 - 150 * r)));
+function padMetrics() {
+  const w = pad.clientWidth, dpr = Math.min(devicePixelRatio, 2);
+  if (pad.width !== Math.round(w * dpr)) { pad.width = Math.round(w * dpr); pad.height = Math.round(w * dpr); }
+  return { w, dpr, c: w / 2, rad: w / 2 - 14 };
+}
+const padXY = ([az, el], m) => { const r = elToR(el) * m.rad, a = az * Math.PI / 180; return [m.c + Math.sin(a) * r, m.c - Math.cos(a) * r]; };
+
+function drawPad() {
+  if ($('draw').hidden) return;
+  const m = padMetrics(), g = pg;
+  if (!m.w) return;
+  g.setTransform(m.dpr, 0, 0, m.dpr, 0, 0);
+  g.clearRect(0, 0, m.w, m.w);
+  const css = getComputedStyle(document.documentElement);
+  const colA = css.getPropertyValue('--vibe-a').trim() || '#3b5bdb', colB = css.getPropertyValue('--vibe-b').trim() || '#20c997';
+  g.strokeStyle = 'rgba(214,222,255,.14)'; g.lineWidth = 1;
+  [0.3, 0.6, 1].forEach(f => { g.beginPath(); g.arc(m.c, m.c, f * m.rad, 0, Math.PI * 2); g.stroke(); });
+  g.beginPath(); g.moveTo(m.c, m.c - m.rad); g.lineTo(m.c, m.c + m.rad); g.moveTo(m.c - m.rad, m.c); g.lineTo(m.c + m.rad, m.c); g.stroke();
+  g.fillStyle = 'rgba(214,222,255,.55)'; g.font = '600 11px Manrope, sans-serif'; g.textAlign = 'center';
+  g.fillText('Front', m.c, 12); g.fillText('Behind', m.c, m.w - 4);
+  g.fillText('above', m.c, m.c - 0.15 * m.rad + 4); g.fillText('ear level', m.c, m.c - 0.6 * m.rad - 4); g.fillText('below', m.c, m.c - 0.92 * m.rad);
+  g.textAlign = 'left'; g.fillText('L', 4, m.c - 4); g.textAlign = 'right'; g.fillText('R', m.w - 4, m.c - 4);
+  // you, in the middle
+  g.fillStyle = 'rgba(214,222,255,.25)'; g.beginPath(); g.arc(m.c, m.c, 9, 0, Math.PI * 2); g.fill();
+  // the path
+  const pts = st.custom.map(p => padXY(p, m));
+  if (pts.length > 1) {
+    const grad = g.createLinearGradient(0, 0, m.w, m.w); grad.addColorStop(0, colA); grad.addColorStop(1, colB);
+    g.strokeStyle = grad; g.lineWidth = 2.5; g.beginPath();
+    pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    if (pts.length >= 3) g.closePath();
+    g.stroke();
+  }
+  pts.forEach(([x, y], i) => {
+    g.fillStyle = i === PAD.drag ? '#fff' : colB; g.beginPath(); g.arc(x, y, 11, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#0f1630'; g.font = '800 11px Manrope, sans-serif'; g.textAlign = 'center'; g.fillText(String(i + 1), x, y + 4);
+  });
+  $('pad-count').textContent = st.custom.length < 3 ? `${st.custom.length} of at least 3 points` : `${st.custom.length} points (up to 16)`;
+}
+
+function padPoint(e) {
+  const r = pad.getBoundingClientRect(), m = padMetrics();
+  const x = e.clientX - r.left - m.c, y = e.clientY - r.top - m.c;
+  const dist = Math.min(1, Math.hypot(x, y) / m.rad);
+  return [Math.round(Math.atan2(x, -y) * 180 / Math.PI), rToEl(dist), x + m.c, y + m.c];
+}
+let padApply;
+const applyPad = () => { saveSpatial(); drawPad(); clearTimeout(padApply); if (st.custom.length >= 3) padApply = setTimeout(() => { buildLayout(st.n); st.lastNode = -1; }, 120); };
+pad.addEventListener('pointerdown', e => {
+  const [az, el, px, py] = padPoint(e), m = padMetrics();
+  PAD.drag = st.custom.findIndex(p => { const [x, y] = padXY(p, m); return Math.hypot(x - px, y - py) < 16; });
+  if (PAD.drag < 0) {
+    if (st.custom.length >= 16) return toast('Up to 16 points. Drag a point to move it, or Undo.');
+    st.custom.push([az, el]); PAD.drag = st.custom.length - 1;
+  }
+  pad.setPointerCapture(e.pointerId);
+  applyPad();
+});
+pad.addEventListener('pointermove', e => { if (PAD.drag < 0) return; const [az, el] = padPoint(e); st.custom[PAD.drag] = [az, el]; applyPad(); });
+pad.addEventListener('pointerup', () => { PAD.drag = -1; drawPad(); });
+$('pad-undo').onclick = () => { st.custom.pop(); applyPad(); };
+$('pad-clear').onclick = () => { st.custom = []; applyPad(); toast('Cleared. Tap the circle to place new points.'); };
+new ResizeObserver(() => drawPad()).observe(pad);
+
+$('surround').value = st.surround;
+$('surround').addEventListener('input', e => { st.surround = Number(e.target.value); engine.setSurround(st.surround); saveSpatial(); updateLabels(); });
+
 // ---------- start ----------
+engine.surround = st.surround;
+renderShapes();
 buildLayout(8);
 updateLabels();
 resize();

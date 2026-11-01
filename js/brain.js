@@ -202,13 +202,20 @@ export class Brain {
     this.camera.position.set(0, 0.25, this.baseZ);
     this.camera.lookAt(0, 0, 0);
     this.view = { w, h, x: wide ? Math.min(250, w * 0.2) : 0, y: wide ? 0 : h * 0.2 };
-    this.applyView(this.intro ? 0 : 1);
+    // Intro framing: the head centred in the space above the "Cortex FM" title, small enough
+    // to fit there (the title takes `introReserve` px at the bottom).
+    const free = Math.max(h * 0.4, h - (this.introReserve || 0));
+    const visH = 3.4 * h / (free * 0.86);                    // world units the screen must show
+    this.introZ = Math.max(this.baseZ, visH / (2 * Math.tan(THREE.MathUtils.degToRad(17))));
+    this.introY = (h - free) / 2 - free * 0.07; // a little low in that space, so head and title read as one
+    this.applyView(this.intro ? this.intro.k : 1);
   }
 
   /** Shift the head toward its resting spot beside the panels (k = 0 centred, 1 resting). */
   applyView(k) {
     const v = this.view; if (!v) return;
-    this.camera.setViewOffset(v.w, v.h, v.x * k, v.y * k, v.w, v.h);
+    const iy = this.introY || 0;
+    this.camera.setViewOffset(v.w, v.h, v.x * k, iy + (v.y - iy) * k, v.w, v.h);
     this.camera.updateProjectionMatrix();
   }
 
@@ -219,13 +226,14 @@ export class Brain {
    */
   playIntro(duration = 4.2) {
     if (this.reduced) return Promise.resolve();
-    this.intro = { t: 0, duration, snapped: false };
+    this.intro = { t: 0, duration, snapped: false, k: 0, leave: -1 };
     this.uniforms.uReveal.value = 0;
-    this.applyView(0);
+    this.resize();
     return new Promise(res => { this.intro.done = res; });
   }
 
-  skipIntro() { if (this.intro) this.intro.t = this.intro.duration; }
+  /** End the intro: finish building at once (if skipped) and glide to the resting place. */
+  skipIntro() { if (this.intro) { this.intro.t = Math.max(this.intro.t, this.intro.duration); if (this.intro.leave < 0) this.intro.leave = 0; } }
 
   /** Set the vibe of the track that is playing now. */
   setVibe({ energy, valence, tempo }, colorA, colorB) {
@@ -350,11 +358,15 @@ export class Brain {
       this.ripple = 0.09;
     }
     if (I.snapped) this.uniforms.uFlash.value = Math.max(this.uniforms.uFlash.value, (1 - seg(0.66, 0.8)) * 0.9);
-    // 4. The head spins in and the camera glides from far away to its resting place.
+    // 4. The head spins in and the camera glides in, stopping centred above the title.
     const settle = outCubic(seg(0, 1));
     this.head.rotation.y += (1 - settle) * -Math.PI * 1.6;
-    this.camera.position.z = this.baseZ + (1 - outCubic(seg(0, 0.7))) * 5;
-    this.applyView(outCubic(seg(0.75, 1)));
+    const iz = this.introZ || this.baseZ;
+    // 5. Once the title fades (skipIntro), glide to the resting place beside the panels.
+    if (I.leave >= 0) I.leave = Math.min(1, I.leave + dt / 0.9);
+    I.k = I.leave < 0 ? 0 : outCubic(Math.max(0, I.leave));
+    this.camera.position.z = iz + (1 - outCubic(seg(0, 0.7))) * 5 + (this.baseZ - iz) * I.k;
+    this.applyView(I.k);
 
     if (p >= 1) {
       this.uniforms.uReveal.value = 1;
@@ -362,11 +374,12 @@ export class Brain {
       this.band.position.y = 0.02;
       this.cups.forEach(c => { c.rotation.x = 0; });
       this.bars.forEach(b => { b.visible = true; });
-      this.camera.position.z = this.baseZ;
-      this.applyView(1);
-      const done = I.done;
-      this.intro = null;
-      done?.();
+      if (I.done) { const done = I.done; I.done = null; done(); }
+      if (I.leave >= 1) {
+        this.camera.position.z = this.baseZ;
+        this.intro = null;
+        this.applyView(1);
+      }
     }
   }
 }

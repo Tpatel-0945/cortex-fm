@@ -135,3 +135,50 @@ export function dirAt(table, u, out = [0, 0, 0]) {
   out[0] /= l; out[1] /= l; out[2] /= l;
   return out;
 }
+
+// ---- trajectory shapes ----
+// Each shape is a closed curve f(t), t in 0..1, returning a unit direction in the listener's
+// frame (front -Z, right +X, up +Y). It is sampled into 8 or 16 marked points, then the same
+// smooth path builder runs on it, so every shape glides just as smoothly.
+
+const v = (az, el) => { const a = az * Math.PI / 180, e = el * Math.PI / 180; return [Math.cos(e) * Math.sin(a), Math.sin(e), -Math.cos(e) * Math.cos(a)]; };
+const ease = x => x * x * (3 - 2 * x);
+function rng(seed) { let t = seed >>> 0; return () => { t += 0x6D2B79F5; let r = Math.imul(t ^ (t >>> 15), 1 | t); r ^= r + Math.imul(r ^ (r >>> 7), 61 | r); return ((r ^ (r >>> 14)) >>> 0) / 4294967296; }; }
+const TAU = 2 * Math.PI;
+
+export const SHAPES = {
+  classic: { label: 'Classic orbit', note: null },
+  wave: { label: 'Wave orbit', pick: true,
+    note: 'Circles all the way around you, rising and dipping twice per lap. Our pick for a full Atmos-style tour.',
+    at: t => v(360 * t, 32 * Math.sin(2 * TAU * t)) },
+  glide: { label: 'Spiral glide',
+    note: 'Spirals down around you from above your head to below it, then floats back up.',
+    at: t => { const down = t < 0.5 ? t / 0.5 : (1 - t) / 0.5; return v(720 * t, 62 - 110 * ease(down)); } },
+  pendulum: { label: 'Pendulum',
+    note: 'Swings from ear to ear in front of you, rising a little at each end, like a slow pendulum.',
+    at: t => v(85 * Math.sin(TAU * t), 14 * Math.sin(TAU * t) ** 2 + 7 * Math.cos(TAU * t)) },
+  figure8: { label: 'Figure-8',
+    note: 'Draws a figure of eight around your head, crossing behind you.',
+    at: t => v(150 * Math.sin(TAU * t), 30 * Math.sin(2 * TAU * t)) },
+  halo: { label: 'Halo',
+    note: 'A circle above your head, like a halo.',
+    at: t => v(360 * t, 66) },
+  loop: { label: 'Over-the-top loop',
+    note: 'From in front of you, up over your head, behind you, and back round underneath.',
+    at: t => norm3([0.18 * Math.sin(2 * TAU * t), Math.sin(TAU * t), -Math.cos(TAU * t)]) },
+  wander: { label: 'Wander',
+    note: 'An organic drift all around you. Tap Wander again for a different one.',
+    at: (t, seed) => {
+      const r = rng(seed), p = [r(), r(), r(), r()].map(x => x * TAU);
+      return v(360 * t + 45 * Math.sin(3 * TAU * t + p[0]) + 18 * Math.sin(5 * TAU * t + p[1]), 30 * Math.sin(2 * TAU * t + p[2]) + 14 * Math.sin(3 * TAU * t + p[3]));
+    } },
+  custom: { label: 'Draw your own', note: 'Your own path. Tap the circle to place points in order (front is at the top); drag a point to move it.' },
+};
+
+/** n marked points for a shape (not for classic or custom). */
+export function shapePoints(id, n, seed = 1) {
+  return [...Array(n)].map((_, i) => SHAPES[id].at(i / n, seed));
+}
+
+/** az/el in degrees → unit vector (exported for the draw-your-own pad). */
+export const dirFromAzEl = v;

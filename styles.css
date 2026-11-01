@@ -605,3 +605,19 @@ body.intro-on .readout, body.intro-on .panel, body.intro-on .bar { pointer-event
 .install-row { display: grid; gap: 6px; justify-items: start; }
 .install-row .hint { font-size: 12.5px; }
 .install-row button { width: 100%; height: 46px; }
+
+/* Trajectory card + draw-your-own pad */
+.traj { gap: 10px; }
+.traj .chip[aria-checked="true"] { background: var(--text); color: var(--ink); }
+.traj .chip .pick { font-size: 10.5px; font-weight: 800; margin-left: 6px; padding: 1px 6px; border-radius: 99px; background: rgb(30 215 96 / .16); color: #8ff0b4; }
+.traj .chip[aria-checked="true"] .pick { background: rgb(15 22 48 / .12); color: var(--ink); }
+.draw { display: grid; gap: 8px; }
+#pad { width: 100%; aspect-ratio: 1; max-width: 320px; justify-self: center; border-radius: 50%; background: rgb(4 7 20 / .45); border: 1px solid var(--inner-line); touch-action: none; cursor: crosshair; }
+
+/* Intro sound: shown only when the browser holds sound until a tap */
+.intro-tap { position: fixed; left: 50%; top: max(20px, env(safe-area-inset-top)); translate: -50% 0; margin: 0; padding: 7px 14px; border-radius: 99px;
+  font-size: 13px; font-weight: 600; color: var(--text-2); background: color-mix(in oklab, var(--text) 8%, transparent); border: 1px solid color-mix(in oklab, var(--text) 14%, transparent);
+  animation: intro-fade .5s ease both .3s; opacity: 0; }
+.intro-tap[hidden] { display: none; }
+.check-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 14px; color: var(--text); cursor: pointer; }
+.check-row input { width: 18px; height: 18px; accent-color: var(--ring-calm); }

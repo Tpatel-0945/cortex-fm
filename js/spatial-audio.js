@@ -70,6 +70,37 @@ function makeRoom(ctx) {
   return { input, output };
 }
 
+// The 360° surround bed: six virtual speakers fixed around you (azimuth°, elevation°, delay ms).
+export const BED = [[-110, 0, 6], [110, 0, 9], [-150, 8, 13], [150, 8, 17], [-40, 48, 11], [40, 48, 7]];
+const bedDir = (az, el) => { const a = az * Math.PI / 180, e = el * Math.PI / 180; return [Math.cos(e) * Math.sin(a), Math.sin(e), -Math.cos(e) * Math.cos(a)]; };
+
+/**
+ * Like a Dolby Atmos "bed": the song's spacious part (left minus right, plus a little of the
+ * rest above the bass) feeds six fixed HRTF speakers around and above you. Each gets its own
+ * short delay, phase filter and polarity so they blend into one surround instead of six copies.
+ * The moving sound (the "object") still carries the song's centre.
+ */
+function makeBed(ctx) {
+  const input = new GainNode(ctx), out = new GainNode(ctx, { gain: 0 });
+  const split = new ChannelSplitterNode(ctx, { numberOfOutputs: 2 });
+  input.connect(split);
+  const amb = new GainNode(ctx, { gain: 1 });
+  const sideL = new GainNode(ctx, { gain: 0.5 }), sideR = new GainNode(ctx, { gain: -0.5 });
+  split.connect(sideL, 0); split.connect(sideR, 1); sideL.connect(amb); sideR.connect(amb);
+  const mid = new GainNode(ctx, { gain: 0.16 }), hp = new BiquadFilterNode(ctx, { type: 'highpass', frequency: 160, Q: 0.5 });
+  split.connect(mid, 0); split.connect(mid, 1); mid.connect(hp).connect(amb);
+  BED.forEach(([az, el, ms], i) => {
+    const d = new DelayNode(ctx, { delayTime: ms / 1000, maxDelayTime: 0.05 });
+    const ap = new BiquadFilterNode(ctx, { type: 'allpass', frequency: 500 + i * 450, Q: 0.7 });
+    const pol = new GainNode(ctx, { gain: (i % 2 ? -1 : 1) * 0.55 });
+    const p = new PannerNode(ctx, { panningModel: 'HRTF', distanceModel: 'inverse', refDistance: 1, rolloffFactor: 0.3, channelCount: 1, channelCountMode: 'explicit' });
+    const [x, y, z] = bedDir(az, el).map(c => c * 2.4);
+    p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z;
+    amb.connect(d).connect(ap).connect(pol).connect(p).connect(out);
+  });
+  return { input, out };
+}
+
 function buildGraph(ctx) {
   const studio = new Studio(ctx);
   // channelCount 1: fold the song to one point so the whole song moves around you.
@@ -95,7 +126,10 @@ function buildGraph(ctx) {
   if (L.positionX) { L.positionX.value = 0; L.positionY.value = 0; L.positionZ.value = 0; L.forwardX.value = 0; L.forwardY.value = 0; L.forwardZ.value = -1; L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0; }
   else { L.setPosition(0, 0, 0); L.setOrientation(0, 0, -1, 0, 1, 0); }
   studio.output.connect(direct);
-  return { studio, air, panner, dry, room, roomNet, spatial, direct, master, inputs: [studio.input] };
+  // 360° surround bed (off until setSurround turns it up).
+  const bed = makeBed(ctx);
+  bed.out.connect(spatial);
+  return { studio, air, panner, dry, room, roomNet, bed, spatial, direct, master, inputs: [studio.input] };
 }
 
 /** One second of silence on loop, as a media element the phone can show controls for. */
@@ -143,7 +177,7 @@ function makeDemoBuffer(ctx) {
 
 export class SpatialEngine {
   constructor() {
-    this.ctx = null; this.buffer = null; this.src = null; this.offset = 0; this.playing = false; this.bypass = false; this.roomAmount = 0.35; this.roomOn = true;
+    this.ctx = null; this.buffer = null; this.src = null; this.offset = 0; this.playing = false; this.bypass = false; this.roomAmount = 0.35; this.roomOn = true; this.surround = 0.6; this.bedOn = false;
     this.path = null;                                   // { table, phi } from trajectory.js
     this.traj = { lap: 12, dist: 1.8, breath: 0.05, surprise: 0.5, seed: (Math.random() * 2 ** 31) | 0 };
     this.reports = [];                                  // recent positions from the audio thread
@@ -159,6 +193,8 @@ export class SpatialEngine {
     this.analyser = new AnalyserNode(this.ctx, { fftSize: 512, smoothingTimeConstant: 0.75 });
     this.g.master.connect(this.analyser).connect(this.ctx.destination);
     this.levels = new Uint8Array(this.analyser.frequencyBinCount);
+
+    this.setSurround(this.surround);
 
     // A silent looping track: the phone sees a media player, keeps the app alive and shows
     // lock-screen controls. The music itself goes straight to the speakers (no extra path).
@@ -347,6 +383,19 @@ export class SpatialEngine {
     p.positionX.setTargetAtTime(x, now, 0.015); p.positionY.setTargetAtTime(y, now, 0.015); p.positionZ.setTargetAtTime(z, now, 0.015);
   }
 
+  /** 360° surround amount, 0..1. At 0 the bed is taken out of the graph and costs nothing. */
+  setSurround(amount) {
+    this.surround = amount;
+    if (!this.ctx) return;
+    this.g.bed.out.gain.setTargetAtTime(amount * 0.9, this.ctx.currentTime, 0.08);
+    const on = amount > 0.005;
+    if (on === this.bedOn) return;
+    this.bedOn = on;
+    clearTimeout(this.bedTimer);
+    if (on) this.g.studio.output.connect(this.g.bed.input);
+    else this.bedTimer = setTimeout(() => { if (!this.bedOn) try { this.g.studio.output.disconnect(this.g.bed.input); } catch { /* */ } }, 400);
+  }
+
   setRoom(amount) {
     this.roomAmount = amount;
     if (this.ctx) {
@@ -392,6 +441,7 @@ export class SpatialEngine {
     const g = buildGraph(off);
     g.room.gain.value = this.roomAmount;
     g.direct.gain.value = 0;
+    if (this.surround > 0.005) { g.studio.output.connect(g.bed.input); g.bed.out.gain.value = this.surround * 0.9; } // the saved file gets the 360° surround too
     g.studio.apply(this.g.studio.settings, false); // the saved file gets your Studio sound too
     const src = new AudioBufferSourceNode(off, { buffer: this.buffer });
     g.inputs.forEach(n => src.connect(n));

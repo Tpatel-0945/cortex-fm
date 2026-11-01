@@ -4,6 +4,7 @@ import { DEMO_TRACKS } from './demo.js';
 import { reducedMotion, motionPref, setMotionPref } from './motion.js';
 import { onInstallChange, promptInstall, browserName, openInChromeLink } from './install.js';
 import { savedTaste, MODES as STUDIO_MODES } from './studio.js';
+import { startIntroSound, introSoundOn, setIntroSound } from './intro-sound.js';
 
 const $ = id => document.getElementById(id);
 const pref = {
@@ -126,6 +127,8 @@ function bindSettings() {
   $('env-note').hidden = !sp.fromEnv();
   $('env-note').textContent = `Using the Client ID from .env (…${sp.getClientId().slice(-4)}). Redirect URI: ${sp.redirectUri()}`;
 
+  $('intro-sound').checked = introSoundOn();
+  $('intro-sound').onchange = e => setIntroSound(e.target.checked);
   $('open-settings').onclick = () => dlg.showModal();
   $('account').onclick = () => (state.connected || !sp.getClientId() ? dlg.showModal() : login());
   $('copy-redirect').onclick = async () => {
@@ -746,15 +749,18 @@ async function playIntro() {
   if (!WANTS_INTRO || !brain) { document.body.classList.remove('intro-on'); return; }
   const el = $('intro');
   el.hidden = false;
-  let finished = false;
+  brain.introReserve = innerHeight - el.querySelector('.intro-brand').getBoundingClientRect().top + 24; // keep the head above the title
+  const sound = startIntroSound({ onBlocked: show => { $('intro-tap').hidden = !show; } });
+  let finished = false, skipped = false;
   const finish = () => {
     if (finished) return; finished = true;
+    if (skipped) sound.stop(); else sound.release();
     brain.skipIntro();
     el.classList.add('out');
     document.body.classList.remove('intro-on');
     setTimeout(() => { el.hidden = true; el.classList.remove('out'); }, 700);
   };
-  const skip = () => finish();
+  const skip = () => { skipped = true; finish(); };
   $('intro-skip').onclick = skip;
   const keySkip = e => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') skip(); };
   document.addEventListener('keydown', keySkip, { once: true });
